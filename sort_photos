@@ -1,0 +1,31 @@
+#!/bin/bash
+
+if [ $# -ne 2 ]; then
+    echo "Chyba - zadejte dva argumenty: zdrojový_adresář, cílový_adresář." >&2
+    exit 1
+fi
+
+sort(){
+    SOURCE="$1"
+    TARGET="$2"
+
+    for ITEM in "$SOURCE"; do
+
+        if [ -f "$SOURCE/$ITEM" ]; then
+            YEAR=$(exiftool -d '%Y' -s3 -DateTimeOriginal "$ITEM")
+            MONTH=$(exiftool -d '%m' -s3 -DateTimeOriginal "$ITEM")
+
+            if mkdir "$TARGET/$YEAR" 2>/dev/null; then
+                for M in {01..12}; do
+                    mkdir "$TARGET/$YEAR/$M"
+                done
+            
+
+            mv "$SOURCE/$ITEM" "$TARGET/$YEAR/$M/$ITEM"
+        else
+            sort "$1/$ITEM" "$TARGET"
+        fi
+    done
+}
+
+sort "$1" "$2"
