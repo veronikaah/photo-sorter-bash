@@ -1,31 +1,84 @@
 #!/bin/bash
+shopt -s nullglob
 
 if [ $# -ne 2 ]; then
-    echo "Chyba - zadejte dva argumenty: zdrojový_adresář, cílový_adresář." >&2
+    echo "Error: Enter 2 arguments - source directory and target directory." >&2
     exit 1
 fi
 
-sort(){
-    SOURCE="$1"
-    TARGET="$2"
+if [ ! -d "$1" ]; then
+    echo "Error: Source directory '$1' does not exist." >&2
+    exit 1
+fi
 
-    for ITEM in "$SOURCE"; do
+if [ ! -d "$2" ]; then
+    echo "Error: Target directory "$2" does not exist." >&2
+    exit 1
+fi
 
-        if [ -f "$SOURCE/$ITEM" ]; then
-            YEAR=$(exiftool -d '%Y' -s3 -DateTimeOriginal "$ITEM")
-            MONTH=$(exiftool -d '%m' -s3 -DateTimeOriginal "$ITEM")
+SOURCE=$(realpath "$1")
+TARGET=$(realpath "$2")
 
-            if mkdir "$TARGET/$YEAR" 2>/dev/null; then
-                for M in {01..12}; do
-                    mkdir "$TARGET/$YEAR/$M"
-                done
-            
+case "$TARGET" in
+    "$SOURCE" | "$SOURCE"/*)
+        echo "Error: Target directory cannot be contained within the source directory." >&2
+        exit 1
+        ;;
+esac
 
-            mv "$SOURCE/$ITEM" "$TARGET/$YEAR/$M/$ITEM"
-        else
-            sort "$1/$ITEM" "$TARGET"
+FILES=$(find "$SOURCE" -type f | wc -l)
+COUNT=0
+FAILED=0
+
+sort_photos(){
+    local S="$1"
+    local DATE YEAR MONTH NAME
+    echo "Currently processing directory: $SOURCE"
+    echo "-------------------------------------------------"
+    for ITEM in "$S"/*; do
+        NAME=$(basename "$ITEM")
+
+        # Normal file
+        if [ -f "$ITEM" ]; then
+            COUNT=$((COUNT + 1))
+
+            # Get date from EXIF
+            DATE=$(exiftool -d '%Y/%m' -s3 -DateTimeOriginal "$ITEM" 2>/dev/null) 
+            if [ -z "$DATE" ]; then
+
+                # Fallback to modification date from stat
+                DATE=$(date -d "@$(stat -c %Y "$ITEM")" '+%Y/%m')
+                if [ -z "$DATE" ]; then
+                    echo "$COUNT/$FILES Creation date is unavailable for file: $ITEM." >&2
+                    FAILED=$((FAILED + 1))
+                    continue
+                fi
+
+                echo "$COUNT/$FILES files. File $NAME was processed using modification date (no EXIF)."
+            else
+                if [ $(($COUNT % 5)) -eq 0 ]; then
+                    echo "$COUNT/$FILES files processed..."
+                fi
+            fi
+
+            YEAR=${DATE%/*}
+            MONTH=${DATE#*/}
+
+            if mkdir -p "$TARGET/$YEAR/$MONTH" && mv "$ITEM" "$TARGET/$YEAR/$MONTH/$NAME"; then
+                :
+            else
+                echo "[$COUNT/$FILES] File $NAME transfer failed." >&2
+                FAILED=$((FAILED + 1))
+            fi
+        fi
+
+        if [ -d "$ITEM" ]; then
+            sort_photos "$ITEM"
         fi
     done
 }
 
-sort "$1" "$2"
+sort_photos "$SOURCE"
+echo "==================================================="
+SUCCESSFUL=$((COUNT - FAILED))
+echo "Done! $SUCCESSFUL/$COUNT files successfully moved. Processing of $FAILED files failed."
